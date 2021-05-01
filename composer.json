@@ -1,0 +1,29 @@
+{
+    "name": "simbiat/bicxml",
+    "type": "library",
+    "keywords": ["Bank","php","BIC","SWIFT","Russia"],
+    "description": "Library to download BIC library in XML format from Central Bank of Russia website",
+    "homepage": "https://github.com/Simbiat/bicxml",
+    "license": "AGPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Dmitry Kustov",
+            "email": "simbiat@outlook.com",
+            "homepage": "https://simbiat.ru",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "php": "^8",
+        "simbiat/database": "^2.0.0+20210311"
+    },
+    "autoload": {
+        "psr-4": {
+            "Simbiat\\": "src/"
+        }
+    },
+	"support": {
+		"issues": "https://github.com/Simbiat/bicxml/issues",
+		"source": "https://github.com/Simbiat/bicxml"
+	}
+}
