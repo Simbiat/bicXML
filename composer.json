@@ -16,7 +16,8 @@
     "require": {
         "php": "^8",
         "simbiat/database": "^2.0.0+20210311",
-        "simbiat/accountkeying": "*"
+        "simbiat/accountkeying": "*",
+        "simbiat/arrayhelpers": "^1.0.3+20201227"
     },
     "autoload": {
         "psr-4": {
