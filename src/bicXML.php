@@ -1,26 +1,30 @@
 <?php
+#Supressing SqlResolve, since we use prefixes and PHPStorm does not support them, thus failing on them
+/** @noinspection SqlResolve */
 declare(strict_types=1);
 namespace Simbiat;
 
+use Simbiat\Database\Controller;
+
 class bicXML
-{    
+{
     #Base link where we download BIC files
-    const bicdownbase = 'https://www.cbr.ru/VFS/mcirabis/BIK/';
+    const bicDownBase = 'https://www.cbr.ru/VFS/mcirabis/BIK/';
     #Link to SWIFT codes
-    const swiftzipname = 'https://www.cbr.ru/analytics/digest/bik_swift-bik.zip';
+    const swiftZipName = 'https://www.cbr.ru/analytics/digest/bik_swift-bik.zip';
     #List of files to process. Ordered to avoid foreign key issues
-    const dbffiles = ['pzn', 'rclose', 'real', 'reg', 'tnp', 'uer', 'uerko', 'bnkseek', 'bnkdel', 'bik_swif', 'co', 'keybaseb', 'keybasef', 'kgur', 'prim', 'rayon'];
+    const dbfFiles = ['pzn', 'rclose', 'real', 'reg', 'tnp', 'uer', 'uerko', 'bnkseek', 'bnkdel', 'bik_swif', 'co', 'keybaseb', 'keybasef', 'kgur', 'prim', 'rayon'];
     #List of columns, that represent dates
-    const datecolumns = ['CB_DATE', 'CE_DATE', 'DATE_END', 'DATE_CH', 'DATE_IN', 'DATEDEL', 'DT_IZM', 'DT_ST', 'DT_FIN'];
-    private string $dbprefix = '';
-    
-    public function __construct(string $dbprefix = 'bic__')
+    const dateColumns = ['CB_DATE', 'CE_DATE', 'DATE_END', 'DATE_CH', 'DATE_IN', 'DATEDEL', 'DT_IZM', 'DT_ST', 'DT_FIN'];
+    private string $dbPrefix;
+
+    public function __construct(string $dbPrefix = 'bic__')
     {
-        $this->dbprefix = $dbprefix;
+        $this->dbPrefix = $dbPrefix;
     }
-    
+
     #Function to update the BICs data in database
-    public function dbUpdate(string $datadir, string $date = 'DDMMYYYY'): bool|string
+    public function dbUpdate(string $dataDir, string $date = 'DDMMYYYY'): bool|string
     {
         try {
             #Download files first
@@ -28,55 +32,52 @@ class bicXML
             if ($date === 'DDMMYYYY') {
                 $date = date('dmY');
             }
-            $bicdate = strtotime(substr($date, 0, 2).'.'.substr($date, 2, 2).'.'.substr($date, 4, 4));
             #Set filename
-            $bicfname = 'bik_db_'.$date.'.zip';
+            $bicFileName = 'bik_db_'.$date.'.zip';
             #Attempt to download main bic archive
-            if (file_put_contents($datadir.$bicfname, @fopen(self::bicdownbase.$bicfname, 'r'))) {
+            if (file_put_contents($dataDir.$bicFileName, @fopen(self::bicDownBase.$bicFileName, 'r'))) {
                 #Unzip the file
-                if (file_exists($datadir.$bicfname)) {
+                if (file_exists($dataDir.$bicFileName)) {
                     $zip = new \ZipArchive;
-                    if ($zip->open($datadir.$bicfname) === true) {
-                        $zip->extractTo($datadir);
+                    if ($zip->open($dataDir.$bicFileName) === true) {
+                        $zip->extractTo($dataDir);
                         $zip->close();
                     }
                 }
                 #Delete the file
-                @unlink($datadir.$bicfname);
-                @unlink($datadir.'FC.DBF');
-                @unlink($datadir.'KORREK.DBF');
+                @unlink($dataDir.$bicFileName);
+                @unlink($dataDir.'FC.DBF');
+                @unlink($dataDir.'KORREK.DBF');
                 #Meant to remove files like 3503_21N.DBF
-                array_map('unlink', glob($datadir.'[0-9]*.DBF'));
+                array_map('unlink', glob($dataDir.'[0-9]*.DBF'));
             } else {
-                @unlink($datadir.$bicfname);
+                @unlink($dataDir.$bicFileName);
                 return false;
             }
             #Attempt to download SWIFT library
-            if (file_put_contents($datadir.basename(self::swiftzipname), @fopen(self::swiftzipname, 'r'))) {
+            if (file_put_contents($dataDir.basename(self::swiftZipName), @fopen(self::swiftZipName, 'r'))) {
                 #Unzip the file
-                if (file_exists($datadir.basename(self::swiftzipname))) {
+                if (file_exists($dataDir.basename(self::swiftZipName))) {
                     $zip = new \ZipArchive;
-                    if ($zip->open($datadir.basename(self::swiftzipname)) === true) {
-                        $zip->extractTo($datadir);
+                    if ($zip->open($dataDir.basename(self::swiftZipName)) === true) {
+                        $zip->extractTo($dataDir);
                         $zip->close();
                     }
                 }
-                #Delete the file
-                @unlink($datadir.basename(self::swiftzipname));
-            } else {
-                @unlink($datadir.basename(self::swiftzipname));
             }
-            foreach (self::dbffiles as $file) {
+            #Delete the file
+            @unlink($dataDir.basename(self::swiftZipName));
+            foreach (self::dbfFiles as $file) {
                 #Prepare empty array for queries
                 $queries = [];
-                $filename = $datadir.$file.'.dbf';
+                $filename = $dataDir.$file.'.dbf';
                 if (file_exists($filename)) {
                     #Convert DBF file to array
-                    $array = (new \Simbiat\ArrayHelpers)->dbfToArray($filename);
+                    $array = (new ArrayHelpers)->dbfToArray($filename);
                     if (is_array($array) && !empty($array)) {
                         #Normalize data
                         #Iterate rows
-                        foreach ($array as $key=>$element) {
+                        foreach ($array as $element) {
                             #Prim file can some keys, that are missing in main list for some reason, need to skip them, since foreign key constraint will fail otherwise
                             if ($file === 'prim' && (in_array($element['VKEY'], ['392!EOmE', 'Fyg(wdtf', 'Yw7y9=6+']))) {
                                 continue;
@@ -87,7 +88,7 @@ class bicXML
                             #Iterate columns
                             foreach ($element as $column=>$value) {
                                 #Check if column is one of those that hold dates
-                                if (in_array($column, self::datecolumns)) {
+                                if (in_array($column, self::dateColumns)) {
                                     if (empty(trim($value))) {
                                         #Save it as NULL
                                         $value = NULL;
@@ -124,7 +125,7 @@ class bicXML
                             $update = rtrim($update, ', ');
                             #bnkseek and bnkdel are stored in common table, hence the 'rename' below
                             $queries[] = [
-                                'INSERT INTO `'.$this->dbprefix.(($file == 'bnkseek' || $file == 'bnkdel') ? 'list' : $file).'` SET '.$update.' ON DUPLICATE KEY UPDATE '.$update,
+                                'INSERT INTO `'.$this->dbPrefix.(($file == 'bnkseek' || $file == 'bnkdel') ? 'list' : $file).'` SET '.$update.' ON DUPLICATE KEY UPDATE '.$update,
                                 $bindings
                             ];
                         }
@@ -133,103 +134,103 @@ class bicXML
                 #Deleting the file
                 @unlink($filename);
                 #Running the queries we've accumulated
-                (new \Simbiat\Database\Controller)->query($queries);
+                (new Controller)->query($queries);
             }
             return true;
         } catch(\Exception $e) {
             return $e->getMessage()."\r\n".$e->getTraceAsString();
         }
     }
-    
+
     #Function to return current data about the bank
     public function getCurrent(string $vkey): array
     {
         #Get general data
-        $bicdetails = (new \Simbiat\Database\Controller)->selectRow('SELECT biclist.`VKEY`, `VKEYDEL`, `'.$this->dbprefix.'keybaseb`.`BVKEY`, `'.$this->dbprefix.'keybasef`.`FVKEY`, `ADR`, `AT1`, `AT2`, `CKS`, `DATE_CH`, `DATE_IN`, `DATEDEL`, `DT_IZM`, `IND`, `KSNP`, `NAMEP`, `'.$this->dbprefix.'keybaseb`.`NAMEMAXB`, `'.$this->dbprefix.'keybasef`.`NAMEMAXF`, `NEWKS`, biclist.`NEWNUM`, `'.$this->dbprefix.'co`.`BIC_UF`, `'.$this->dbprefix.'co`.`DT_ST`, `'.$this->dbprefix.'co`.`DT_FIN`, `'.$this->dbprefix.'bik_swif`.`KOD_SWIFT`, `'.$this->dbprefix.'bik_swif`.`NAME_SRUS`, `NNP`, `OKPO`, `PERMFO`, `'.$this->dbprefix.'pzn`.`NAME` AS `PZN`, `'.$this->dbprefix.'real`.`NAME_OGR` AS `REAL`, `'.$this->dbprefix.'rclose`.`NAMECLOSE` AS `R_CLOSE`, `REGN`, `'.$this->dbprefix.'reg`.`NAME` AS `RGN`, `'.$this->dbprefix.'reg`.`CENTER`, `RKC`, `SROK`, `TELEF`, `'.$this->dbprefix.'tnp`.`FULLNAME` AS `TNP`, `'.$this->dbprefix.'uerko`.`UERNAME` AS `UER`, `'.$this->dbprefix.'prim`.`PRIM1`, `'.$this->dbprefix.'prim`.`PRIM2`, `'.$this->dbprefix.'prim`.`PRIM3`, `'.$this->dbprefix.'rayon`.`NAME` AS `RAYON`, `'.$this->dbprefix.'kgur`.`KGUR` FROM `'.$this->dbprefix.'list` biclist
-                LEFT JOIN `'.$this->dbprefix.'bik_swif` ON `'.$this->dbprefix.'bik_swif`.`KOD_RUS` = biclist.`NEWNUM`
-                LEFT JOIN `'.$this->dbprefix.'reg` ON `'.$this->dbprefix.'reg`.`RGN` = biclist.`RGN`
-                LEFT JOIN `'.$this->dbprefix.'uerko` ON `'.$this->dbprefix.'uerko`.`UERKO` = biclist.`UER`
-                LEFT JOIN `'.$this->dbprefix.'tnp` ON `'.$this->dbprefix.'tnp`.`TNP` = biclist.`TNP`
-                LEFT JOIN `'.$this->dbprefix.'pzn` ON `'.$this->dbprefix.'pzn`.`PZN` = biclist.`PZN`
-                LEFT JOIN `'.$this->dbprefix.'real` ON `'.$this->dbprefix.'real`.`REAL` = biclist.`REAL`
-                LEFT JOIN `'.$this->dbprefix.'rclose` ON `'.$this->dbprefix.'rclose`.`R_CLOSE` = biclist.`R_CLOSE`
-                LEFT JOIN `'.$this->dbprefix.'keybaseb` ON `'.$this->dbprefix.'keybaseb`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `'.$this->dbprefix.'keybasef` ON `'.$this->dbprefix.'keybasef`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `'.$this->dbprefix.'prim` ON `'.$this->dbprefix.'prim`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `'.$this->dbprefix.'rayon` ON `'.$this->dbprefix.'rayon`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `'.$this->dbprefix.'co` ON `'.$this->dbprefix.'co`.`BIC_CF` = biclist.`NEWNUM`
-                LEFT JOIN `'.$this->dbprefix.'kgur` ON `'.$this->dbprefix.'kgur`.`NEWNUM` = biclist.`RKC`
+        $bicDetails = (new Controller)->selectRow('SELECT `biclist`.`VKEY`, `VKEYDEL`, `'.$this->dbPrefix.'keybaseb`.`BVKEY`, `'.$this->dbPrefix.'keybasef`.`FVKEY`, `ADR`, `AT1`, `AT2`, `CKS`, `DATE_CH`, `DATE_IN`, `DATEDEL`, `DT_IZM`, `IND`, `KSNP`, `NAMEP`, `'.$this->dbPrefix.'keybaseb`.`NAMEMAXB`, `'.$this->dbPrefix.'keybasef`.`NAMEMAXF`, `NEWKS`, biclist.`NEWNUM`, `'.$this->dbPrefix.'co`.`BIC_UF`, `'.$this->dbPrefix.'co`.`DT_ST`, `'.$this->dbPrefix.'co`.`DT_FIN`, `'.$this->dbPrefix.'bik_swif`.`KOD_SWIFT`, `'.$this->dbPrefix.'bik_swif`.`NAME_SRUS`, `NNP`, `OKPO`, `PERMFO`, `'.$this->dbPrefix.'pzn`.`NAME` AS `PZN`, `'.$this->dbPrefix.'real`.`NAME_OGR` AS `REAL`, `'.$this->dbPrefix.'rclose`.`NAMECLOSE` AS `R_CLOSE`, `REGN`, `'.$this->dbPrefix.'reg`.`NAME` AS `RGN`, `'.$this->dbPrefix.'reg`.`CENTER`, `RKC`, `SROK`, `TELEF`, `'.$this->dbPrefix.'tnp`.`FULLNAME` AS `TNP`, `'.$this->dbPrefix.'uerko`.`UERNAME` AS `UER`, `'.$this->dbPrefix.'prim`.`PRIM1`, `'.$this->dbPrefix.'prim`.`PRIM2`, `'.$this->dbPrefix.'prim`.`PRIM3`, `'.$this->dbPrefix.'rayon`.`NAME` AS `RAYON`, `'.$this->dbPrefix.'kgur`.`KGUR` FROM `'.$this->dbPrefix.'list` biclist
+                LEFT JOIN `'.$this->dbPrefix.'bik_swif` ON `'.$this->dbPrefix.'bik_swif`.`KOD_RUS` = biclist.`NEWNUM`
+                LEFT JOIN `'.$this->dbPrefix.'reg` ON `'.$this->dbPrefix.'reg`.`RGN` = biclist.`RGN`
+                LEFT JOIN `'.$this->dbPrefix.'uerko` ON `'.$this->dbPrefix.'uerko`.`UERKO` = biclist.`UER`
+                LEFT JOIN `'.$this->dbPrefix.'tnp` ON `'.$this->dbPrefix.'tnp`.`TNP` = biclist.`TNP`
+                LEFT JOIN `'.$this->dbPrefix.'pzn` ON `'.$this->dbPrefix.'pzn`.`PZN` = biclist.`PZN`
+                LEFT JOIN `'.$this->dbPrefix.'real` ON `'.$this->dbPrefix.'real`.`REAL` = biclist.`REAL`
+                LEFT JOIN `'.$this->dbPrefix.'rclose` ON `'.$this->dbPrefix.'rclose`.`R_CLOSE` = biclist.`R_CLOSE`
+                LEFT JOIN `'.$this->dbPrefix.'keybaseb` ON `'.$this->dbPrefix.'keybaseb`.`VKEY` = biclist.`VKEY`
+                LEFT JOIN `'.$this->dbPrefix.'keybasef` ON `'.$this->dbPrefix.'keybasef`.`VKEY` = biclist.`VKEY`
+                LEFT JOIN `'.$this->dbPrefix.'prim` ON `'.$this->dbPrefix.'prim`.`VKEY` = biclist.`VKEY`
+                LEFT JOIN `'.$this->dbPrefix.'rayon` ON `'.$this->dbPrefix.'rayon`.`VKEY` = biclist.`VKEY`
+                LEFT JOIN `'.$this->dbPrefix.'co` ON `'.$this->dbPrefix.'co`.`BIC_CF` = biclist.`NEWNUM`
+                LEFT JOIN `'.$this->dbPrefix.'kgur` ON `'.$this->dbPrefix.'kgur`.`NEWNUM` = biclist.`RKC`
                 WHERE biclist.`VKEY` = :vkey', [':vkey'=>$vkey]);
-        if (empty($bicdetails)) {
+        if (empty($bicDetails)) {
             return [];
         } else {
             #Generating address from different fields
-            $bicdetails['ADR'] = (!empty($bicdetails['IND']) ? $bicdetails['IND'].' ' : '').(!empty($bicdetails['TNP']) ? $bicdetails['TNP'].' ' : '').(!empty($bicdetails['NNP']) ? $bicdetails['NNP'].(!empty($bicdetails['RAYON']) ?  ' '.$bicdetails['RAYON'] : '').', ' : '').$bicdetails['ADR'];
+            $bicDetails['ADR'] = (!empty($bicDetails['IND']) ? $bicDetails['IND'].' ' : '').(!empty($bicDetails['TNP']) ? $bicDetails['TNP'].' ' : '').(!empty($bicDetails['NNP']) ? $bicDetails['NNP'].(!empty($bicDetails['RAYON']) ?  ' '.$bicDetails['RAYON'] : '').', ' : '').$bicDetails['ADR'];
             #Get list of phones
-            if (!empty($bicdetails['TELEF'])) {
-                $bicdetails['TELEF'] = $this->phoneList($bicdetails['TELEF']);
+            if (!empty($bicDetails['TELEF'])) {
+                $bicDetails['TELEF'] = $this->phoneList($bicDetails['TELEF']);
             } else {
-                $bicdetails['TELEF'] = [];
+                $bicDetails['TELEF'] = [];
             }
             #If RKC=NEWNUM it means, that current bank is RKC and does not have bank above it
-            if ($bicdetails['RKC'] == $bicdetails['NEWNUM']) {
-                $bicdetails['RKC'] = '';
+            if ($bicDetails['RKC'] == $bicDetails['NEWNUM']) {
+                $bicDetails['RKC'] = '';
             }
             #If we have an RKC - get the whole chain of RKCs
-            if (!empty($bicdetails['RKC'])) {$bicdetails['RKC'] = $this->rkcChain($bicdetails['RKC']);}
+            if (!empty($bicDetails['RKC'])) {$bicDetails['RKC'] = $this->rkcChain($bicDetails['RKC']);}
             #Get authorized branch
-            if (!empty($bicdetails['BIC_UF'])) {$bicdetails['BIC_UF'] = $this->bicUf($bicdetails['BIC_UF']);}
+            if (!empty($bicDetails['BIC_UF'])) {$bicDetails['BIC_UF'] = $this->bicUf($bicDetails['BIC_UF']);}
             #Get all branches of the bank (if any)
-            $bicdetails['filials'] = $this->filials($bicdetails['NEWNUM']);
+            $bicDetails['filials'] = $this->filials($bicDetails['NEWNUM']);
             #Get the chain of predecessors (if any)
-            $bicdetails['predecessors'] = $this->predecessors($bicdetails['VKEY']);
+            $bicDetails['predecessors'] = $this->predecessors($bicDetails['VKEY']);
             #Get the chain of successors (if any)
-            $bicdetails['successors'] = $this->successors($bicdetails['VKEYDEL']);
-            return $bicdetails;
+            $bicDetails['successors'] = $this->successors($bicDetails['VKEYDEL']);
+            return $bicDetails;
         }
     }
-    
+
     #Function to search for BICs
     public function Search(string $what = ''): array
     {
-        return (new \Simbiat\Database\Controller)->selectAll('SELECT `VKEY`, `NEWNUM`, `NAMEP`, `DATEDEL` FROM `'.$this->dbprefix.'list` WHERE `VKEY` LIKE :name OR `NEWNUM` LIKE :name OR `NAMEP` LIKE :name OR `KSNP` LIKE :name OR `REGN` LIKE :name ORDER BY `NAMEP` ASC', [':name'=>'%'.$what.'%']);
+        return (new Controller)->selectAll('SELECT `VKEY`, `NEWNUM`, `NAMEP`, `DATEDEL` FROM `'.$this->dbPrefix.'list` WHERE `VKEY` LIKE :name OR `NEWNUM` LIKE :name OR `NAMEP` LIKE :name OR `KSNP` LIKE :name OR `REGN` LIKE :name ORDER BY `NAMEP`', [':name'=>'%'.$what.'%']);
     }
-    
+
     #Function to get basic statistics
-    public function Statistics(int $lastchanges = 10): array
+    public function Statistics(int $lastChanges = 10): array
     {
         #Cache Controller
-        $dbcon = (new \Simbiat\Database\Controller);
-        $temp = $dbcon->selectAll('SELECT COUNT(*) as \'bics\' FROM `'.$this->dbprefix.'list` WHERE `DATEDEL` IS NULL UNION ALL SELECT COUNT(*) as \'bics\' FROM `'.$this->dbprefix.'list` WHERE `DATEDEL` IS NOT NULL');
+        $dbCon = (new Controller);
+        $temp = $dbCon->selectAll('SELECT COUNT(*) as \'bics\' FROM `'.$this->dbPrefix.'list` WHERE `DATEDEL` IS NULL UNION ALL SELECT COUNT(*) as \'bics\' FROM `'.$this->dbPrefix.'list` WHERE `DATEDEL` IS NOT NULL');
         $statistics['bicactive'] = $temp[0]['bics'];
         $statistics['bicdeleted'] = $temp[1]['bics'];
-        $statistics['bicchanges'] = $dbcon->selectAll('SELECT * FROM ((SELECT \'changed\' as `type`, `VKEY`, `NAMEP`, `DATEDEL`, `DT_IZM` FROM `'.$this->dbprefix.'list` a WHERE `DATEDEL` IS NULL ORDER BY `DT_IZM` DESC LIMIT '.$lastchanges.') UNION ALL (SELECT \'deleted\' as `type`, `VKEY`, `NAMEP`, `DATEDEL`, `DT_IZM` FROM `'.$this->dbprefix.'list` b WHERE `DATEDEL` IS NOT NULL ORDER BY `DATEDEL` DESC LIMIT '.$lastchanges.')) c');
+        $statistics['bicchanges'] = $dbCon->selectAll('SELECT * FROM ((SELECT \'changed\' as `type`, `VKEY`, `NAMEP`, `DATEDEL`, `DT_IZM` FROM `'.$this->dbPrefix.'list` a WHERE `DATEDEL` IS NULL ORDER BY `DT_IZM` DESC LIMIT '.$lastChanges.') UNION ALL (SELECT \'deleted\' as `type`, `VKEY`, `NAMEP`, `DATEDEL`, `DT_IZM` FROM `'.$this->dbPrefix.'list` b WHERE `DATEDEL` IS NOT NULL ORDER BY `DATEDEL` DESC LIMIT '.$lastChanges.')) c');
         return $statistics;
     }
-    
+
     #Function to prepare tables
     public function install(): bool
     {
         #Get contents from SQL file
         $sql = file_get_contents(__DIR__.'\install.sql');
         #Replace prefix
-        $sql = str_replace('%dbprefix%', $this->dbprefix, $sql);
+        $sql = str_replace('%dbPrefix%', $this->dbPrefix, $sql);
         #Split file content into queries
-        $sql = (new \Simbiat\Database\Controller)->stringToQueries($sql);
+        $sql = (new Controller)->stringToQueries($sql);
         try {
-            (new \Simbiat\Database\Controller)->query($sql);
+            (new Controller)->query($sql);
             return true;
         } catch(\Exception $e) {
             echo $e->getTraceAsString();
             return false;
         }
     }
-    
+
     #Function to get list of all predecessors (each as a chain)
     private function predecessors(string $vkey): array
     {
         #Get initial list
-        $bank = (new \Simbiat\Database\Controller)->selectAll('SELECT `VKEY`, `VKEYDEL`, `NAMEP`, `DATEDEL` FROM `'.$this->dbprefix.'list` WHERE `VKEYDEL` = :newnum ORDER BY `NAMEP` ASC', [':newnum'=>$vkey]);
+        $bank = (new Controller)->selectAll('SELECT `VKEY`, `VKEYDEL`, `NAMEP`, `DATEDEL` FROM `'.$this->dbPrefix.'list` WHERE `VKEYDEL` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
         if (empty($bank)) {
             $bank = array();
         } else {
@@ -241,8 +242,8 @@ class bicXML
                     if (count($next) == 1) {
                         if (!empty($next[0][0]) && is_array($next[0][0])) {
                             $bank[$key] = [];
-                            foreach ($next[0] as $nexti) {
-                                $bank[$key][] = $nexti;
+                            foreach ($next[0] as $nextI) {
+                                $bank[$key][] = $nextI;
                             }
                             $bank[$key][] = $item;
                         } else {
@@ -254,12 +255,12 @@ class bicXML
         }
         return $bank;
     }
-    
+
     #Function to get all successors (each as a chain)
     private function successors(string $vkey): array
     {
         #Get initial list
-        $bank = (new \Simbiat\Database\Controller)->selectAll('SELECT `VKEY`, `VKEYDEL`, `NAMEP`, `DATEDEL` FROM `'.$this->dbprefix.'list` WHERE `VKEY` = :newnum ORDER BY `NAMEP` ASC', [':newnum'=>$vkey]);
+        $bank = (new Controller)->selectAll('SELECT `VKEY`, `VKEYDEL`, `NAMEP`, `DATEDEL` FROM `'.$this->dbPrefix.'list` WHERE `VKEY` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
         if (empty($bank)) {
             $bank = [];
         } else {
@@ -272,12 +273,12 @@ class bicXML
         }
         return $bank;
     }
-    
+
     #Function to get all RKCs for a bank as a chain
     private function rkcChain(string $bic): array
     {
         #Get initial list
-        $bank = (new \Simbiat\Database\Controller)->selectAll('SELECT `VKEY`, `NEWNUM`, `RKC`, `NAMEP`, `DATEDEL` FROM `'.$this->dbprefix.'list` WHERE `NEWNUM` = :newnum AND `DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT `VKEY`, `NEWNUM`, `RKC`, `NAMEP`, `DATEDEL` FROM `'.$this->dbPrefix.'list` WHERE `NEWNUM` = :newnum AND `DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         } else {
@@ -288,12 +289,12 @@ class bicXML
         }
         return $bank;
     }
-    
+
     #Function to get authorized branches as a chain
     private function bicUf(string $bic): array
     {
         #Get initial list
-        $bank = (new \Simbiat\Database\Controller)->selectAll('SELECT `VKEY`, `NAMEP`, `DATEDEL`, `'.$this->dbprefix.'co`.`BIC_UF` FROM `'.$this->dbprefix.'list` biclist LEFT JOIN `'.$this->dbprefix.'co` ON `'.$this->dbprefix.'co`.`BIC_CF` = biclist.`NEWNUM` WHERE biclist.`NEWNUM` = :newnum AND biclist.`DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT `VKEY`, `NAMEP`, `DATEDEL`, `'.$this->dbPrefix.'co`.`BIC_UF` FROM `'.$this->dbPrefix.'list` biclist LEFT JOIN `'.$this->dbPrefix.'co` ON `'.$this->dbPrefix.'co`.`BIC_CF` = biclist.`NEWNUM` WHERE biclist.`NEWNUM` = :newnum AND biclist.`DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         } else {
@@ -304,44 +305,44 @@ class bicXML
         }
         return $bank;
     }
-    
+
     #Function to get all branches of a bank
     private function filials(string $bic): array
     {
-        $bank = (new \Simbiat\Database\Controller)->selectAll('SELECT `'.$this->dbprefix.'list`.`VKEY`, `'.$this->dbprefix.'list`.`NEWNUM`, `'.$this->dbprefix.'list`.`NAMEP`, `'.$this->dbprefix.'list`.`DATEDEL` FROM `'.$this->dbprefix.'co` bicco LEFT JOIN `'.$this->dbprefix.'list` ON `'.$this->dbprefix.'list`.`NEWNUM` = bicco.`BIC_CF` WHERE `BIC_UF` = :newnum ORDER BY `'.$this->dbprefix.'list`.`NAMEP`', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT `'.$this->dbPrefix.'list`.`VKEY`, `'.$this->dbPrefix.'list`.`NEWNUM`, `'.$this->dbPrefix.'list`.`NAMEP`, `'.$this->dbPrefix.'list`.`DATEDEL` FROM `'.$this->dbPrefix.'co` bicco LEFT JOIN `'.$this->dbPrefix.'list` ON `'.$this->dbPrefix.'list`.`NEWNUM` = bicco.`BIC_CF` WHERE `BIC_UF` = :newnum ORDER BY `'.$this->dbPrefix.'list`.`NAMEP`', [':newnum'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         }
         return $bank;
     }
-    
+
     #Function to format list of phones
-    private function phoneList(string $phonestring): array
+    private function phoneList(string $phoneString): array
     {
         #Remove empty brackets
-        $phonestring = str_replace('()', '', $phonestring);
+        $phoneString = str_replace('()', '', $phoneString);
         #Remvoe pager notation (obsolete)
-        $phonestring = str_replace('ПЕЙД', '', $phonestring);
+        $phoneString = str_replace('ПЕЙД', '', $phoneString);
         #Update Moscow code
-        $phonestring = str_replace('(095)', '(495)', $phonestring);
+        $phoneString = str_replace('(095)', '(495)', $phoneString);
         #Attempt to get additional number (to be entered after you've dialed-in)
-        $dob = explode(',ДОБ.', $phonestring);
+        $dob = explode(',ДОБ.', $phoneString);
         if (empty($dob[1])) {
-            $dob = explode(',ДБ.', $phonestring);
+            $dob = explode(',ДБ.', $phoneString);
             if (empty($dob[1])) {
-                $dob = explode('(ДОБ.', $phonestring);
+                $dob = explode('(ДОБ.', $phoneString);
                 if (empty($dob[1])) {
-                    $dob = explode(' ДОБ.', $phonestring);
+                    $dob = explode(' ДОБ.', $phoneString);
                     if (empty($dob[1])) {
-                        $dob = explode('ДОБ', $phonestring);
+                        $dob = explode('ДОБ', $phoneString);
                         if (empty($dob[1])) {
-                            $dob = explode(' код ', $phonestring);
+                            $dob = explode(' код ', $phoneString);
                             if (empty($dob[1])) {
-                                $dob = explode(',АБ.', $phonestring);
+                                $dob = explode(',АБ.', $phoneString);
                                 if (empty($dob[1])) {
-                                    $dob = explode(',Д.', $phonestring);
+                                    $dob = explode(',Д.', $phoneString);
                                     if (empty($dob[1])) {
-                                        $dob = explode('(Д.', $phonestring);
+                                        $dob = explode('(Д.', $phoneString);
                                     }
                                 }
                             }
@@ -383,4 +384,3 @@ class bicXML
         return ['phones'=>$phones,'dob'=>$dobs];
     }
 }
-?>
