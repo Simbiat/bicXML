@@ -1,6 +1,4 @@
 <?php
-#Supressing SqlResolve, since we use prefixes and PHPStorm does not support them, thus failing on them
-/** @noinspection SqlResolve */
 declare(strict_types=1);
 namespace Simbiat;
 
@@ -16,12 +14,6 @@ class bicXML
     const dbfFiles = ['pzn', 'rclose', 'real', 'reg', 'tnp', 'uer', 'uerko', 'bnkseek', 'bnkdel', 'bik_swif', 'co', 'keybaseb', 'keybasef', 'kgur', 'prim', 'rayon'];
     #List of columns, that represent dates
     const dateColumns = ['CB_DATE', 'CE_DATE', 'DATE_END', 'DATE_CH', 'DATE_IN', 'DATEDEL', 'DT_IZM', 'DT_ST', 'DT_FIN'];
-    private string $dbPrefix;
-
-    public function __construct(string $dbPrefix = 'bic__')
-    {
-        $this->dbPrefix = $dbPrefix;
-    }
 
     #Function to update the BICs data in database
     public function dbUpdate(string $dataDir, string $date = 'DDMMYYYY'): bool|string
@@ -124,8 +116,9 @@ class bicXML
                             #Trim the last comma
                             $update = rtrim($update, ', ');
                             #bnkseek and bnkdel are stored in common table, hence the 'rename' below
+                            /** @noinspection SqlResolve */
                             $queries[] = [
-                                'INSERT INTO `'.$this->dbPrefix.(($file == 'bnkseek' || $file == 'bnkdel') ? 'list' : $file).'` SET '.$update.' ON DUPLICATE KEY UPDATE '.$update,
+                                'INSERT INTO `bic__'.(($file == 'bnkseek' || $file == 'bnkdel') ? 'list' : $file).'` SET '.$update.' ON DUPLICATE KEY UPDATE '.$update,
                                 $bindings
                             ];
                         }
@@ -143,23 +136,27 @@ class bicXML
     }
 
     #Function to return current data about the bank
+
+    /**
+     * @throws \Exception
+     */
     public function getCurrent(string $vkey): array
     {
         #Get general data
-        $bicDetails = (new Controller)->selectRow('SELECT `biclist`.`VKEY`, `VKEYDEL`, `'.$this->dbPrefix.'keybaseb`.`BVKEY`, `'.$this->dbPrefix.'keybasef`.`FVKEY`, `ADR`, `AT1`, `AT2`, `CKS`, `DATE_CH`, `DATE_IN`, `DATEDEL`, `DT_IZM`, `IND`, `KSNP`, `NAMEP`, `'.$this->dbPrefix.'keybaseb`.`NAMEMAXB`, `'.$this->dbPrefix.'keybasef`.`NAMEMAXF`, `NEWKS`, biclist.`NEWNUM`, `'.$this->dbPrefix.'co`.`BIC_UF`, `'.$this->dbPrefix.'co`.`DT_ST`, `'.$this->dbPrefix.'co`.`DT_FIN`, `'.$this->dbPrefix.'bik_swif`.`KOD_SWIFT`, `'.$this->dbPrefix.'bik_swif`.`NAME_SRUS`, `NNP`, `OKPO`, `PERMFO`, `'.$this->dbPrefix.'pzn`.`NAME` AS `PZN`, `'.$this->dbPrefix.'real`.`NAME_OGR` AS `REAL`, `'.$this->dbPrefix.'rclose`.`NAMECLOSE` AS `R_CLOSE`, `REGN`, `'.$this->dbPrefix.'reg`.`NAME` AS `RGN`, `'.$this->dbPrefix.'reg`.`CENTER`, `RKC`, `SROK`, `TELEF`, `'.$this->dbPrefix.'tnp`.`FULLNAME` AS `TNP`, `'.$this->dbPrefix.'uerko`.`UERNAME` AS `UER`, `'.$this->dbPrefix.'prim`.`PRIM1`, `'.$this->dbPrefix.'prim`.`PRIM2`, `'.$this->dbPrefix.'prim`.`PRIM3`, `'.$this->dbPrefix.'rayon`.`NAME` AS `RAYON`, `'.$this->dbPrefix.'kgur`.`KGUR` FROM `'.$this->dbPrefix.'list` biclist
-                LEFT JOIN `'.$this->dbPrefix.'bik_swif` ON `'.$this->dbPrefix.'bik_swif`.`KOD_RUS` = biclist.`NEWNUM`
-                LEFT JOIN `'.$this->dbPrefix.'reg` ON `'.$this->dbPrefix.'reg`.`RGN` = biclist.`RGN`
-                LEFT JOIN `'.$this->dbPrefix.'uerko` ON `'.$this->dbPrefix.'uerko`.`UERKO` = biclist.`UER`
-                LEFT JOIN `'.$this->dbPrefix.'tnp` ON `'.$this->dbPrefix.'tnp`.`TNP` = biclist.`TNP`
-                LEFT JOIN `'.$this->dbPrefix.'pzn` ON `'.$this->dbPrefix.'pzn`.`PZN` = biclist.`PZN`
-                LEFT JOIN `'.$this->dbPrefix.'real` ON `'.$this->dbPrefix.'real`.`REAL` = biclist.`REAL`
-                LEFT JOIN `'.$this->dbPrefix.'rclose` ON `'.$this->dbPrefix.'rclose`.`R_CLOSE` = biclist.`R_CLOSE`
-                LEFT JOIN `'.$this->dbPrefix.'keybaseb` ON `'.$this->dbPrefix.'keybaseb`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `'.$this->dbPrefix.'keybasef` ON `'.$this->dbPrefix.'keybasef`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `'.$this->dbPrefix.'prim` ON `'.$this->dbPrefix.'prim`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `'.$this->dbPrefix.'rayon` ON `'.$this->dbPrefix.'rayon`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `'.$this->dbPrefix.'co` ON `'.$this->dbPrefix.'co`.`BIC_CF` = biclist.`NEWNUM`
-                LEFT JOIN `'.$this->dbPrefix.'kgur` ON `'.$this->dbPrefix.'kgur`.`NEWNUM` = biclist.`RKC`
+        $bicDetails = (new Controller)->selectRow('SELECT `biclist`.`VKEY`, `VKEYDEL`, `bic__keybaseb`.`BVKEY`, `bic__keybasef`.`FVKEY`, `ADR`, `AT1`, `AT2`, `CKS`, `DATE_CH`, `DATE_IN`, `DATEDEL`, `DT_IZM`, `IND`, `KSNP`, `NAMEP`, `bic__keybaseb`.`NAMEMAXB`, `bic__keybasef`.`NAMEMAXF`, `NEWKS`, biclist.`NEWNUM`, `bic__co`.`BIC_UF`, `bic__co`.`DT_ST`, `bic__co`.`DT_FIN`, `bic__bik_swif`.`KOD_SWIFT`, `bic__bik_swif`.`NAME_SRUS`, `NNP`, `OKPO`, `PERMFO`, `bic__pzn`.`NAME` AS `PZN`, `bic__real`.`NAME_OGR` AS `REAL`, `bic__rclose`.`NAMECLOSE` AS `R_CLOSE`, `REGN`, `bic__reg`.`NAME` AS `RGN`, `bic__reg`.`CENTER`, `RKC`, `SROK`, `TELEF`, `bic__tnp`.`FULLNAME` AS `TNP`, `bic__uerko`.`UERNAME` AS `UER`, `bic__prim`.`PRIM1`, `bic__prim`.`PRIM2`, `bic__prim`.`PRIM3`, `bic__rayon`.`NAME` AS `RAYON`, `bic__kgur`.`KGUR` FROM `bic__list` biclist
+                LEFT JOIN `bic__bik_swif` ON `bic__bik_swif`.`KOD_RUS` = biclist.`NEWNUM`
+                LEFT JOIN `bic__reg` ON `bic__reg`.`RGN` = biclist.`RGN`
+                LEFT JOIN `bic__uerko` ON `bic__uerko`.`UERKO` = biclist.`UER`
+                LEFT JOIN `bic__tnp` ON `bic__tnp`.`TNP` = biclist.`TNP`
+                LEFT JOIN `bic__pzn` ON `bic__pzn`.`PZN` = biclist.`PZN`
+                LEFT JOIN `bic__real` ON `bic__real`.`REAL` = biclist.`REAL`
+                LEFT JOIN `bic__rclose` ON `bic__rclose`.`R_CLOSE` = biclist.`R_CLOSE`
+                LEFT JOIN `bic__keybaseb` ON `bic__keybaseb`.`VKEY` = biclist.`VKEY`
+                LEFT JOIN `bic__keybasef` ON `bic__keybasef`.`VKEY` = biclist.`VKEY`
+                LEFT JOIN `bic__prim` ON `bic__prim`.`VKEY` = biclist.`VKEY`
+                LEFT JOIN `bic__rayon` ON `bic__rayon`.`VKEY` = biclist.`VKEY`
+                LEFT JOIN `bic__co` ON `bic__co`.`BIC_CF` = biclist.`NEWNUM`
+                LEFT JOIN `bic__kgur` ON `bic__kgur`.`NEWNUM` = biclist.`RKC`
                 WHERE biclist.`VKEY` = :vkey', [':vkey'=>$vkey]);
         if (empty($bicDetails)) {
             return [];
@@ -191,20 +188,28 @@ class bicXML
     }
 
     #Function to search for BICs
+
+    /**
+     * @throws \Exception
+     */
     public function Search(string $what = ''): array
     {
-        return (new Controller)->selectAll('SELECT `VKEY`, `NEWNUM`, `NAMEP`, `DATEDEL` FROM `'.$this->dbPrefix.'list` WHERE `VKEY` LIKE :name OR `NEWNUM` LIKE :name OR `NAMEP` LIKE :name OR `KSNP` LIKE :name OR `REGN` LIKE :name ORDER BY `NAMEP`', [':name'=>'%'.$what.'%']);
+        return (new Controller)->selectAll('SELECT `VKEY`, `NEWNUM`, `NAMEP`, `DATEDEL` FROM `bic__list` WHERE `VKEY` LIKE :name OR `NEWNUM` LIKE :name OR `NAMEP` LIKE :name OR `KSNP` LIKE :name OR `REGN` LIKE :name ORDER BY `NAMEP`', [':name'=>'%'.$what.'%']);
     }
 
     #Function to get basic statistics
+
+    /**
+     * @throws \Exception
+     */
     public function Statistics(int $lastChanges = 10): array
     {
         #Cache Controller
         $dbCon = (new Controller);
-        $temp = $dbCon->selectAll('SELECT COUNT(*) as \'bics\' FROM `'.$this->dbPrefix.'list` WHERE `DATEDEL` IS NULL UNION ALL SELECT COUNT(*) as \'bics\' FROM `'.$this->dbPrefix.'list` WHERE `DATEDEL` IS NOT NULL');
+        $temp = $dbCon->selectAll('SELECT COUNT(*) as \'bics\' FROM `bic__list` WHERE `DATEDEL` IS NULL UNION ALL SELECT COUNT(*) as \'bics\' FROM `bic__list` WHERE `DATEDEL` IS NOT NULL');
         $statistics['bicactive'] = $temp[0]['bics'];
         $statistics['bicdeleted'] = $temp[1]['bics'];
-        $statistics['bicchanges'] = $dbCon->selectAll('SELECT * FROM ((SELECT \'changed\' as `type`, `VKEY`, `NAMEP`, `DATEDEL`, `DT_IZM` FROM `'.$this->dbPrefix.'list` a WHERE `DATEDEL` IS NULL ORDER BY `DT_IZM` DESC LIMIT '.$lastChanges.') UNION ALL (SELECT \'deleted\' as `type`, `VKEY`, `NAMEP`, `DATEDEL`, `DT_IZM` FROM `'.$this->dbPrefix.'list` b WHERE `DATEDEL` IS NOT NULL ORDER BY `DATEDEL` DESC LIMIT '.$lastChanges.')) c');
+        $statistics['bicchanges'] = $dbCon->selectAll('SELECT * FROM ((SELECT \'changed\' as `type`, `VKEY`, `NAMEP`, `DATEDEL`, `DT_IZM` FROM `bic__list` a WHERE `DATEDEL` IS NULL ORDER BY `DT_IZM` DESC LIMIT '.$lastChanges.') UNION ALL (SELECT \'deleted\' as `type`, `VKEY`, `NAMEP`, `DATEDEL`, `DT_IZM` FROM `bic__list` b WHERE `DATEDEL` IS NOT NULL ORDER BY `DATEDEL` DESC LIMIT '.$lastChanges.')) c');
         return $statistics;
     }
 
@@ -213,8 +218,6 @@ class bicXML
     {
         #Get contents from SQL file
         $sql = file_get_contents(__DIR__.'\install.sql');
-        #Replace prefix
-        $sql = str_replace('%dbPrefix%', $this->dbPrefix, $sql);
         #Split file content into queries
         $sql = (new Controller)->stringToQueries($sql);
         try {
@@ -227,10 +230,14 @@ class bicXML
     }
 
     #Function to get list of all predecessors (each as a chain)
+
+    /**
+     * @throws \Exception
+     */
     private function predecessors(string $vkey): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT `VKEY`, `VKEYDEL`, `NAMEP`, `DATEDEL` FROM `'.$this->dbPrefix.'list` WHERE `VKEYDEL` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
+        $bank = (new Controller)->selectAll('SELECT `VKEY`, `VKEYDEL`, `NAMEP`, `DATEDEL` FROM `bic__list` WHERE `VKEYDEL` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
         if (empty($bank)) {
             $bank = array();
         } else {
@@ -257,10 +264,14 @@ class bicXML
     }
 
     #Function to get all successors (each as a chain)
+
+    /**
+     * @throws \Exception
+     */
     private function successors(string $vkey): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT `VKEY`, `VKEYDEL`, `NAMEP`, `DATEDEL` FROM `'.$this->dbPrefix.'list` WHERE `VKEY` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
+        $bank = (new Controller)->selectAll('SELECT `VKEY`, `VKEYDEL`, `NAMEP`, `DATEDEL` FROM `bic__list` WHERE `VKEY` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
         if (empty($bank)) {
             $bank = [];
         } else {
@@ -275,10 +286,14 @@ class bicXML
     }
 
     #Function to get all RKCs for a bank as a chain
+
+    /**
+     * @throws \Exception
+     */
     private function rkcChain(string $bic): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT `VKEY`, `NEWNUM`, `RKC`, `NAMEP`, `DATEDEL` FROM `'.$this->dbPrefix.'list` WHERE `NEWNUM` = :newnum AND `DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT `VKEY`, `NEWNUM`, `RKC`, `NAMEP`, `DATEDEL` FROM `bic__list` WHERE `NEWNUM` = :newnum AND `DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         } else {
@@ -291,10 +306,14 @@ class bicXML
     }
 
     #Function to get authorized branches as a chain
+
+    /**
+     * @throws \Exception
+     */
     private function bicUf(string $bic): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT `VKEY`, `NAMEP`, `DATEDEL`, `'.$this->dbPrefix.'co`.`BIC_UF` FROM `'.$this->dbPrefix.'list` biclist LEFT JOIN `'.$this->dbPrefix.'co` ON `'.$this->dbPrefix.'co`.`BIC_CF` = biclist.`NEWNUM` WHERE biclist.`NEWNUM` = :newnum AND biclist.`DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT `VKEY`, `NAMEP`, `DATEDEL`, `bic__co`.`BIC_UF` FROM `bic__list` biclist LEFT JOIN `bic__co` ON `bic__co`.`BIC_CF` = biclist.`NEWNUM` WHERE biclist.`NEWNUM` = :newnum AND biclist.`DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         } else {
@@ -307,9 +326,13 @@ class bicXML
     }
 
     #Function to get all branches of a bank
+
+    /**
+     * @throws \Exception
+     */
     private function filials(string $bic): array
     {
-        $bank = (new Controller)->selectAll('SELECT `'.$this->dbPrefix.'list`.`VKEY`, `'.$this->dbPrefix.'list`.`NEWNUM`, `'.$this->dbPrefix.'list`.`NAMEP`, `'.$this->dbPrefix.'list`.`DATEDEL` FROM `'.$this->dbPrefix.'co` bicco LEFT JOIN `'.$this->dbPrefix.'list` ON `'.$this->dbPrefix.'list`.`NEWNUM` = bicco.`BIC_CF` WHERE `BIC_UF` = :newnum ORDER BY `'.$this->dbPrefix.'list`.`NAMEP`', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT `bic__list`.`VKEY`, `bic__list`.`NEWNUM`, `bic__list`.`NAMEP`, `bic__list`.`DATEDEL` FROM `bic__co` bicco LEFT JOIN `bic__list` ON `bic__list`.`NEWNUM` = bicco.`BIC_CF` WHERE `BIC_UF` = :newnum ORDER BY `bic__list`.`NAMEP`', [':newnum'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         }
