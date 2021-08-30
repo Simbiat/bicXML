@@ -194,7 +194,7 @@ class bicXML
      */
     public function Search(string $what = ''): array
     {
-        return (new Controller)->selectAll('SELECT `VKEY`, `NEWNUM`, `NAMEP`, `DATEDEL` FROM `bic__list` WHERE `VKEY` LIKE :name OR `NEWNUM` LIKE :name OR `NAMEP` LIKE :name OR `KSNP` LIKE :name OR `REGN` LIKE :name ORDER BY `NAMEP`', [':name'=>'%'.$what.'%']);
+        return (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `DATEDEL` FROM `bic__list` WHERE `VKEY`=:name OR `NEWNUM`=:name OR `KSNP`=:name OR `REGN`=:name OR MATCH (`NAMEP`, `ADR`) AGAINST (:name IN BOOLEAN MODE) ORDER BY `NAMEP`', [':name'=>$what]);
     }
 
     #Function to get basic statistics
@@ -202,14 +202,14 @@ class bicXML
     /**
      * @throws \Exception
      */
-    public function Statistics(int $lastChanges = 10): array
+    public function Statistics(int $lastChanges = 25): array
     {
         #Cache Controller
         $dbCon = (new Controller);
         $temp = $dbCon->selectAll('SELECT COUNT(*) as \'bics\' FROM `bic__list` WHERE `DATEDEL` IS NULL UNION ALL SELECT COUNT(*) as \'bics\' FROM `bic__list` WHERE `DATEDEL` IS NOT NULL');
         $statistics['bicactive'] = $temp[0]['bics'];
         $statistics['bicdeleted'] = $temp[1]['bics'];
-        $statistics['bicchanges'] = $dbCon->selectAll('SELECT * FROM ((SELECT \'changed\' as `type`, `VKEY`, `NAMEP`, `DATEDEL`, `DT_IZM` FROM `bic__list` a WHERE `DATEDEL` IS NULL ORDER BY `DT_IZM` DESC LIMIT '.$lastChanges.') UNION ALL (SELECT \'deleted\' as `type`, `VKEY`, `NAMEP`, `DATEDEL`, `DT_IZM` FROM `bic__list` b WHERE `DATEDEL` IS NOT NULL ORDER BY `DATEDEL` DESC LIMIT '.$lastChanges.')) c');
+        $statistics['bicchanges'] = $dbCon->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `DATEDEL` FROM `bic__list` ORDER BY `DT_IZM` DESC LIMIT '.$lastChanges);
         return $statistics;
     }
 
@@ -237,13 +237,13 @@ class bicXML
     private function predecessors(string $vkey): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT `VKEY`, `VKEYDEL`, `NAMEP`, `DATEDEL` FROM `bic__list` WHERE `VKEYDEL` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
+        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `DATEDEL` FROM `bic__list` WHERE `VKEYDEL` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
         if (empty($bank)) {
             $bank = array();
         } else {
             foreach ($bank as $key=>$item) {
                 #Check for predecessors of predecessor
-                $next = $this->predecessors($item['VKEY']);
+                $next = $this->predecessors($item['id']);
                 if (!empty($next)) {
                     #If predecessor has a predecessor as well - get its predecessors
                     if (count($next) == 1) {
@@ -271,14 +271,14 @@ class bicXML
     private function successors(string $vkey): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT `VKEY`, `VKEYDEL`, `NAMEP`, `DATEDEL` FROM `bic__list` WHERE `VKEY` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
+        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `VKEYDEL`, `DATEDEL` FROM `bic__list` WHERE `VKEY` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
         if (empty($bank)) {
             $bank = [];
         } else {
             #Get successors for each successor
             foreach ($bank as $key=>$item) {
-                if (!empty($item[0]['VKEYDEL']) && $item[0]['VKEYDEL'] != $vkey && $bank[0]['VKEYDEL'] != $bank[0]['VKEY']) {
-                    $bank[$key] = array_merge($item, $this->successors($item[0]['VKEY']));
+                if (!empty($item[0]['VKEYDEL']) && $item[0]['VKEYDEL'] != $vkey && $bank[0]['VKEYDEL'] != $bank[0]['id']) {
+                    $bank[$key] = array_merge($item, $this->successors($item[0]['id']));
                 }
             }
         }
@@ -293,7 +293,7 @@ class bicXML
     private function rkcChain(string $bic): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT `VKEY`, `NEWNUM`, `RKC`, `NAMEP`, `DATEDEL` FROM `bic__list` WHERE `NEWNUM` = :newnum AND `DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `NEWNUM`, `RKC`, `DATEDEL` FROM `bic__list` WHERE `NEWNUM` = :newnum AND `DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         } else {
@@ -313,7 +313,7 @@ class bicXML
     private function bicUf(string $bic): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT `VKEY`, `NAMEP`, `DATEDEL`, `bic__co`.`BIC_UF` FROM `bic__list` biclist LEFT JOIN `bic__co` ON `bic__co`.`BIC_CF` = biclist.`NEWNUM` WHERE biclist.`NEWNUM` = :newnum AND biclist.`DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `DATEDEL`, `bic__co`.`BIC_UF` FROM `bic__list` biclist LEFT JOIN `bic__co` ON `bic__co`.`BIC_CF` = biclist.`NEWNUM` WHERE biclist.`NEWNUM` = :newnum AND biclist.`DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         } else {
@@ -332,7 +332,7 @@ class bicXML
      */
     private function filials(string $bic): array
     {
-        $bank = (new Controller)->selectAll('SELECT `bic__list`.`VKEY`, `bic__list`.`NEWNUM`, `bic__list`.`NAMEP`, `bic__list`.`DATEDEL` FROM `bic__co` bicco LEFT JOIN `bic__list` ON `bic__list`.`NEWNUM` = bicco.`BIC_CF` WHERE `BIC_UF` = :newnum ORDER BY `bic__list`.`NAMEP`', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `bic__list`.`VKEY` as `id`, `bic__list`.`NEWNUM`, `bic__list`.`NAMEP` as `name`, `bic__list`.`DATEDEL` FROM `bic__co` bicco LEFT JOIN `bic__list` ON `bic__list`.`NEWNUM` = bicco.`BIC_CF` WHERE `BIC_UF` = :newnum ORDER BY `bic__list`.`NAMEP`', [':newnum'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         }
