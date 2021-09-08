@@ -34,14 +34,6 @@ class bicXML
     #cURL Handle is static to allow reuse of single instance, if possible
     public static \CurlHandle|null|false $curlHandle = null;
 
-
-    #Link to SWIFT codes
-    const swiftZipName = 'https://www.cbr.ru/analytics/digest/bik_swift-bik.zip';
-    #List of files to process. Ordered to avoid foreign key issues
-    const dbfFiles = ['pzn', 'rclose', 'real', 'reg', 'tnp', 'uer', 'uerko', 'bnkseek', 'bnkdel', 'bik_swif', 'co', 'keybaseb', 'keybasef', 'kgur', 'prim', 'rayon'];
-    #List of columns, that represent dates
-    const dateColumns = ['CB_DATE', 'CE_DATE', 'DATE_END', 'DATE_CH', 'DATE_IN', 'DATEDEL', 'DT_IZM', 'DT_ST', 'DT_FIN'];
-
     public function __construct(string $prefix = 'bic__')
     {
         #Set prefix for SQL
@@ -57,6 +49,11 @@ class bicXML
     {
         #Cache controller
         $dbController = (new Controller);
+
+
+        (new HomeTests)->testDump($dbController->selectAll('SELECT  *, (SELECT COUNT(*) FROM `bic__list` a WHERE a.`BIC` = b.`BIC`) as `count` FROM `bic__list` b WHERE `VKEYDEL` IS NOT NULL HAVING `count` > 1 ORDER BY `count` DESC;'));
+        exit;
+
         $currentDate = strtotime(date('d.m.Y', time()));
         #Get date of current library
         $libDate = $dbController->selectValue('SELECT `value` FROM `'.$this->prefix.'settings` WHERE `setting`=\'date\'');
@@ -185,175 +182,44 @@ class bicXML
     #Old code
     #########
 
-
-    #Function to update the BICs data in database
-    public function dbUpdate_old(string $dataDir, string $date = 'DDMMYYYY'): bool|string
-    {
-        try {
-            #Download files first
-            #If date was not provided, use current system one
-            if ($date === 'DDMMYYYY') {
-                $date = date('dmY');
-            }
-            #Set filename
-            $bicFileName = 'bik_db_'.$date.'.zip';
-            #Attempt to download main bic archive
-            if (file_put_contents($dataDir.$bicFileName, @fopen(self::bicDownBase.$bicFileName, 'r'))) {
-                #Unzip the file
-                if (file_exists($dataDir.$bicFileName)) {
-                    $zip = new \ZipArchive;
-                    if ($zip->open($dataDir.$bicFileName) === true) {
-                        $zip->extractTo($dataDir);
-                        $zip->close();
-                    }
-                }
-                #Delete the file
-                @unlink($dataDir.$bicFileName);
-                @unlink($dataDir.'FC.DBF');
-                @unlink($dataDir.'KORREK.DBF');
-                #Meant to remove files like 3503_21N.DBF
-                array_map('unlink', glob($dataDir.'[0-9]*.DBF'));
-            } else {
-                @unlink($dataDir.$bicFileName);
-                return false;
-            }
-            #Attempt to download SWIFT library
-            if (file_put_contents($dataDir.basename(self::swiftZipName), @fopen(self::swiftZipName, 'r'))) {
-                #Unzip the file
-                if (file_exists($dataDir.basename(self::swiftZipName))) {
-                    $zip = new \ZipArchive;
-                    if ($zip->open($dataDir.basename(self::swiftZipName)) === true) {
-                        $zip->extractTo($dataDir);
-                        $zip->close();
-                    }
-                }
-            }
-            #Delete the file
-            @unlink($dataDir.basename(self::swiftZipName));
-            foreach (self::dbfFiles as $file) {
-                #Prepare empty array for queries
-                $queries = [];
-                $filename = $dataDir.$file.'.dbf';
-                if (file_exists($filename)) {
-                    #Convert DBF file to array
-                    $array = (new ArrayHelpers)->dbfToArray($filename);
-                    if (is_array($array) && !empty($array)) {
-                        #Normalize data
-                        #Iterate rows
-                        foreach ($array as $element) {
-                            #Prim file can some keys, that are missing in main list for some reason, need to skip them, since foreign key constraint will fail otherwise
-                            if ($file === 'prim' && (in_array($element['VKEY'], ['392!EOmE', 'Fyg(wdtf', 'Yw7y9=6+']))) {
-                                continue;
-                            }
-                            #Prepare variables for update
-                            $bindings = [];
-                            $update = '';
-                            #Iterate columns
-                            foreach ($element as $column=>$value) {
-                                #Check if column is one of those that hold dates
-                                if (in_array($column, self::dateColumns)) {
-                                    if (empty(trim($value))) {
-                                        #Save it as NULL
-                                        $value = NULL;
-                                    } else {
-                                        #Parse string and convert it to UNIX timestamp
-                                        $value = strtotime(substr($value, 6, 2).'.'.substr($value, 4, 2).'.'.substr($value, 0, 4));
-                                        #If 0 is return - save as NULL
-                                        if ($value < 0) {
-                                            $value = NULL;
-                                        }
-                                    }
-                                    #Add to variables for update
-                                    $bindings[':'.$column] = array((empty($value) ? NULL : $value), (empty($value) ? 'null' : 'date'));
-                                    $update .= '`'.$column.'` = :'.$column.', ';
-                                } else {
-                                    #Some columns are not actually used, so we can safely ignore them
-                                    if ($column !== 'deleted' && $column !== 'DT_IZMR') {
-                                        #Convert value to UTF
-                                        $value = trim(iconv('CP866', 'UTF-8', $value));
-                                        #To be honest, do not remember why this has to be emptied and too lazy to re-read the documentation for DBF files
-                                        if ($column == 'PZN' && $value == '60') {
-                                            $value = '';
-                                        }
-                                        if (($column == 'TNP' || $column == 'R_CLOSE') && empty($value)) {
-                                            $bindings[':'.$column] = array(NULL, 'null');
-                                        } else {
-                                            $bindings[':'.$column] = $value;
-                                        }
-                                        $update .= '`'.$column.'` = :'.$column.', ';
-                                    }
-                                }
-                            }
-                            #Trim the last comma
-                            $update = rtrim($update, ', ');
-                            #bnkseek and bnkdel are stored in common table, hence the 'rename' below
-                            /** @noinspection SqlResolve */
-                            $queries[] = [
-                                'INSERT INTO `bic__'.(($file == 'bnkseek' || $file == 'bnkdel') ? 'list' : $file).'` SET '.$update.' ON DUPLICATE KEY UPDATE '.$update,
-                                $bindings
-                            ];
-                        }
-                    }
-                }
-                #Deleting the file
-                @unlink($filename);
-                #Running the queries we've accumulated
-                (new Controller)->query($queries);
-            }
-            return true;
-        } catch(\Exception $e) {
-            return $e->getMessage()."\r\n".$e->getTraceAsString();
-        }
-    }
-
     #Function to return current data about the bank
-
     /**
      * @throws \Exception
      */
     public function getCurrent(string $vkey): array
     {
         #Get general data
-        $bicDetails = (new Controller)->selectRow('SELECT `biclist`.`VKEY`, `VKEYDEL`, `bic__keybaseb`.`BVKEY`, `bic__keybasef`.`FVKEY`, `ADR`, `AT1`, `AT2`, `CKS`, `DATE_CH`, `DATE_IN`, `DATEDEL`, `DT_IZM`, `IND`, `KSNP`, `NAMEP`, `bic__keybaseb`.`NAMEMAXB`, `bic__keybasef`.`NAMEMAXF`, `NEWKS`, biclist.`NEWNUM`, `bic__co`.`BIC_UF`, `bic__co`.`DT_ST`, `bic__co`.`DT_FIN`, `bic__bik_swif`.`KOD_SWIFT`, `bic__bik_swif`.`NAME_SRUS`, `NNP`, `OKPO`, `PERMFO`, `bic__pzn`.`NAME` AS `PZN`, `bic__real`.`NAME_OGR` AS `REAL`, `bic__rclose`.`NAMECLOSE` AS `R_CLOSE`, `REGN`, `bic__reg`.`NAME` AS `RGN`, `bic__reg`.`CENTER`, `RKC`, `SROK`, `TELEF`, `bic__tnp`.`FULLNAME` AS `TNP`, `bic__uerko`.`UERNAME` AS `UER`, `bic__prim`.`PRIM1`, `bic__prim`.`PRIM2`, `bic__prim`.`PRIM3`, `bic__rayon`.`NAME` AS `RAYON`, `bic__kgur`.`KGUR` FROM `bic__list` biclist
-                LEFT JOIN `bic__bik_swif` ON `bic__bik_swif`.`KOD_RUS` = biclist.`NEWNUM`
-                LEFT JOIN `bic__reg` ON `bic__reg`.`RGN` = biclist.`RGN`
-                LEFT JOIN `bic__uerko` ON `bic__uerko`.`UERKO` = biclist.`UER`
-                LEFT JOIN `bic__tnp` ON `bic__tnp`.`TNP` = biclist.`TNP`
-                LEFT JOIN `bic__pzn` ON `bic__pzn`.`PZN` = biclist.`PZN`
-                LEFT JOIN `bic__real` ON `bic__real`.`REAL` = biclist.`REAL`
+        $bicDetails = (new Controller)->selectRow('SELECT `biclist`.`VKEY`, `VKEYDEL`, `BVKEY`, `FVKEY`, `Adr`, `AT1`, `AT2`, `CKS`, `DATE_CH`, `DateIn`, `DateOut`, `Updated`, `Ind`, `bic__srvcs`.`Description` AS `Srvcs`, `NameP`, `NAMEMAXB`, `NEWKS`, biclist.`BIC`, `PrntBIC`, `SWIFT_NAME`, `Nnp`, `OKPO`, `PERMFO`, `bic__pzn`.`NAME` AS `PtType`, `bic__rclose`.`NAMECLOSE` AS `R_CLOSE`, `RegN`, `bic__reg`.`NAME` AS `Rgn`, `bic__reg`.`CENTER`, `RKC`, `SROK`, `TELEF`, `Tnp`, `PRIM1`, `PRIM2`, `PRIM3` FROM `bic__list` biclist
+                LEFT JOIN `bic__reg` ON `bic__reg`.`RGN` = biclist.`Rgn`
+                LEFT JOIN `bic__pzn` ON `bic__pzn`.`PtType` = biclist.`PtType`
                 LEFT JOIN `bic__rclose` ON `bic__rclose`.`R_CLOSE` = biclist.`R_CLOSE`
-                LEFT JOIN `bic__keybaseb` ON `bic__keybaseb`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `bic__keybasef` ON `bic__keybasef`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `bic__prim` ON `bic__prim`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `bic__rayon` ON `bic__rayon`.`VKEY` = biclist.`VKEY`
-                LEFT JOIN `bic__co` ON `bic__co`.`BIC_CF` = biclist.`NEWNUM`
-                LEFT JOIN `bic__kgur` ON `bic__kgur`.`NEWNUM` = biclist.`RKC`
+                LEFT JOIN `bic__srvcs` ON `bic__srvcs`.`Srvcs` = biclist.`Srvcs`
                 WHERE biclist.`VKEY` = :vkey', [':vkey'=>$vkey]);
         if (empty($bicDetails)) {
             return [];
         } else {
             #Generating address from different fields
-            $bicDetails['ADR'] = (!empty($bicDetails['IND']) ? $bicDetails['IND'].' ' : '').(!empty($bicDetails['TNP']) ? $bicDetails['TNP'].' ' : '').(!empty($bicDetails['NNP']) ? $bicDetails['NNP'].(!empty($bicDetails['RAYON']) ?  ' '.$bicDetails['RAYON'] : '').', ' : '').$bicDetails['ADR'];
+            $bicDetails['Adr'] = (!empty($bicDetails['Ind']) ? $bicDetails['Ind'].' ' : '').(!empty($bicDetails['Tnp']) ? $bicDetails['Tnp'].' ' : '').(!empty($bicDetails['Nnp']) ? $bicDetails['Nnp'].', ' : '').$bicDetails['Adr'];
             #Get list of phones
             if (!empty($bicDetails['TELEF'])) {
                 $bicDetails['TELEF'] = $this->phoneList($bicDetails['TELEF']);
             } else {
                 $bicDetails['TELEF'] = [];
             }
-            #If RKC=NEWNUM it means, that current bank is RKC and does not have bank above it
-            if ($bicDetails['RKC'] == $bicDetails['NEWNUM']) {
+            #If RKC=BIC it means, that current bank is RKC and does not have bank above it
+            if ($bicDetails['RKC'] == $bicDetails['BIC']) {
                 $bicDetails['RKC'] = '';
             }
             #If we have an RKC - get the whole chain of RKCs
             if (!empty($bicDetails['RKC'])) {$bicDetails['RKC'] = $this->rkcChain($bicDetails['RKC']);}
             #Get authorized branch
-            if (!empty($bicDetails['BIC_UF'])) {$bicDetails['BIC_UF'] = $this->bicUf($bicDetails['BIC_UF']);}
+            if (!empty($bicDetails['PrntBIC'])) {$bicDetails['PrntBIC'] = $this->bicUf($bicDetails['PrntBIC']);}
             #Get all branches of the bank (if any)
-            $bicDetails['filials'] = $this->filials($bicDetails['NEWNUM']);
+            $bicDetails['filials'] = $this->filials($bicDetails['BIC']);
             #Get the chain of predecessors (if any)
             $bicDetails['predecessors'] = $this->predecessors($bicDetails['VKEY']);
             #Get the chain of successors (if any)
-            $bicDetails['successors'] = $this->successors($bicDetails['VKEYDEL']);
+            $bicDetails['successors'] = (empty($bicDetails['VKEYDEL']) ? [] : $this->successors($bicDetails['VKEYDEL']));
             return $bicDetails;
         }
     }
@@ -365,7 +231,7 @@ class bicXML
      */
     public function Search(string $what = ''): array
     {
-        return (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `DATEDEL` FROM `bic__list` WHERE `VKEY`=:name OR `NEWNUM`=:name OR `KSNP`=:name OR `REGN`=:name OR MATCH (`NAMEP`, `ADR`) AGAINST (:name IN BOOLEAN MODE) ORDER BY `NAMEP`', [':name'=>$what]);
+        return (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NameP` as `name`, `DateOut` FROM `bic__list` WHERE `VKEY`=:name OR `BIC`=:name OR `OLD_NEWNUM`=:name OR `RegN`=:name OR MATCH (`NameP`, `Adr`) AGAINST (:name IN BOOLEAN MODE) ORDER BY `NameP`', [':name'=>$what]);
     }
 
     #Function to get basic statistics
@@ -377,10 +243,10 @@ class bicXML
     {
         #Cache Controller
         $dbCon = (new Controller);
-        $temp = $dbCon->selectAll('SELECT COUNT(*) as \'bics\' FROM `bic__list` WHERE `DATEDEL` IS NULL UNION ALL SELECT COUNT(*) as \'bics\' FROM `bic__list` WHERE `DATEDEL` IS NOT NULL');
+        $temp = $dbCon->selectAll('SELECT COUNT(*) as \'bics\' FROM `bic__list` WHERE `DateOut` IS NULL UNION ALL SELECT COUNT(*) as \'bics\' FROM `bic__list` WHERE `DateOut` IS NOT NULL');
         $statistics['bicactive'] = $temp[0]['bics'];
         $statistics['bicdeleted'] = $temp[1]['bics'];
-        $statistics['bicchanges'] = $dbCon->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `DATEDEL` FROM `bic__list` ORDER BY `DT_IZM` DESC LIMIT '.$lastChanges);
+        $statistics['bicchanges'] = $dbCon->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NameP` as `name`, `DateOut` FROM `bic__list` ORDER BY `Updated` DESC LIMIT '.$lastChanges);
         return $statistics;
     }
 
@@ -408,7 +274,7 @@ class bicXML
     private function predecessors(string $vkey): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `DATEDEL` FROM `bic__list` WHERE `VKEYDEL` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
+        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NameP` as `name`, `DateOut` FROM `bic__list` WHERE `VKEYDEL` = :BIC ORDER BY `NameP`', [':BIC'=>$vkey]);
         if (empty($bank)) {
             $bank = array();
         } else {
@@ -442,7 +308,7 @@ class bicXML
     private function successors(string $vkey): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `VKEYDEL`, `DATEDEL` FROM `bic__list` WHERE `VKEY` = :newnum ORDER BY `NAMEP`', [':newnum'=>$vkey]);
+        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NameP` as `name`, `VKEYDEL`, `DateOut` FROM `bic__list` WHERE `VKEY` = :BIC ORDER BY `NameP`', [':BIC'=>$vkey]);
         if (empty($bank)) {
             $bank = [];
         } else {
@@ -464,12 +330,12 @@ class bicXML
     private function rkcChain(string $bic): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `NEWNUM`, `RKC`, `DATEDEL` FROM `bic__list` WHERE `NEWNUM` = :newnum AND `DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NameP` as `name`, `BIC`, `RKC`, `DateOut` FROM `bic__list` WHERE `BIC` = :BIC AND `DateOut` IS NULL LIMIT 1', [':BIC'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         } else {
             #Get RKC for RKC
-            if (!empty($bank[0]['RKC']) && $bank[0]['RKC'] != $bic && $bank[0]['RKC'] != $bank[0]['NEWNUM']) {
+            if (!empty($bank[0]['RKC']) && $bank[0]['RKC'] != $bic && $bank[0]['RKC'] != $bank[0]['BIC']) {
                 $bank = array_merge($bank, $this->rkcChain($bank[0]['RKC']));
             }
         }
@@ -477,33 +343,31 @@ class bicXML
     }
 
     #Function to get authorized branches as a chain
-
     /**
      * @throws \Exception
      */
     private function bicUf(string $bic): array
     {
         #Get initial list
-        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `VKEY` as `id`, `NAMEP` as `name`, `DATEDEL`, `bic__co`.`BIC_UF` FROM `bic__list` biclist LEFT JOIN `bic__co` ON `bic__co`.`BIC_CF` = biclist.`NEWNUM` WHERE biclist.`NEWNUM` = :newnum AND biclist.`DATEDEL` IS NULL LIMIT 1', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`,`VKEY` as `id`,`NameP` as `name`, `DateOut`, `PrntBIC` FROM `bic__list` WHERE `BIC` = :BIC LIMIT 1', [':BIC'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         } else {
             #Get authorized branch of authorized branch
-            if (!empty($bank[0]['BIC_UF']) && $bank[0]['BIC_UF'] != $bic && isset($bank[0]['NEWNUM']) && $bank[0]['BIC_UF'] != $bank[0]['NEWNUM']) {
-                $bank = array_merge($bank, $this->bicUf($bank[0]['BIC_UF']));
+            if (!empty($bank[0]['PrntBIC']) && $bank[0]['PrntBIC'] != $bic && isset($bank[0]['BIC']) && $bank[0]['PrntBIC'] != $bank[0]['BIC']) {
+                $bank = array_merge($bank, $this->bicUf($bank[0]['PrntBIC']));
             }
         }
         return $bank;
     }
 
     #Function to get all branches of a bank
-
     /**
      * @throws \Exception
      */
     private function filials(string $bic): array
     {
-        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, `bic__list`.`VKEY` as `id`, `bic__list`.`NEWNUM`, `bic__list`.`NAMEP` as `name`, `bic__list`.`DATEDEL` FROM `bic__co` bicco LEFT JOIN `bic__list` ON `bic__list`.`NEWNUM` = bicco.`BIC_CF` WHERE `BIC_UF` = :newnum ORDER BY `bic__list`.`NAMEP`', [':newnum'=>$bic]);
+        $bank = (new Controller)->selectAll('SELECT \'bic\' as `type`, biclist.`VKEY` as `id`, biclist.`BIC`, biclist.`NameP` as `name`, biclist.`DateOut` FROM `bic__list` biclist LEFT JOIN `bic__list` bicco ON biclist.`BIC` = bicco.`PrntBIC` WHERE biclist.`PrntBIC` = :BIC ORDER BY biclist.`NameP`', [':BIC'=>$bic]);
         if (empty($bank)) {
             $bank = [];
         }
