@@ -1,186 +1,18 @@
 <?php
 declare(strict_types=1);
-namespace Simbiat;
+namespace Simbiat\bicXML;
 
 use Simbiat\Database\Controller;
 
-class bicXML
+class Display
 {
     private string $prefix;
-    #Base link where we download BIC files
-    const bicDownBase = 'https://www.cbr.ru/PSystem/payment_system/?UniDbQuery.Posted=True&UniDbQuery.To=';
-    #Base link for href attribute
-    const bicBaseHref = 'https://www.cbr.ru';
-
-    #cURL options
-    protected array $CURL_OPTIONS = [
-        CURLOPT_POST => false,
-        CURLOPT_HEADER => true,
-        CURLOPT_RETURNTRANSFER => true,
-        #Allow caching and reuse of already open connections
-        CURLOPT_FRESH_CONNECT => false,
-        CURLOPT_FORBID_REUSE => false,
-        #Let cURL determine appropriate HTTP version
-        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_NONE,
-        CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT => 30,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_MAXREDIRS => 3,
-        CURLOPT_HTTPHEADER => ['Content-type: text/html; charset=utf-8', 'Accept-Language: en'],
-        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.159 Safari/537.36 Edg/92.0.902.84',
-        CURLOPT_ENCODING => '',
-        CURLOPT_SSL_VERIFYPEER => false,
-    ];
-    #cURL Handle is static to allow reuse of single instance, if possible
-    public static \CurlHandle|null|false $curlHandle = null;
 
     public function __construct(string $prefix = 'bic__')
     {
         #Set prefix for SQL
         $this->prefix = $prefix;
     }
-
-
-    #Function to update library in database
-    /**
-     * @throws \Exception
-     */
-    public function dbUpdate(): bool
-    {
-        #Cache controller
-        $dbController = (new Controller);
-
-
-        (new HomeTests)->testDump($dbController->selectAll('SELECT  *, (SELECT COUNT(*) FROM `bic__list` a WHERE a.`BIC` = b.`BIC`) as `count` FROM `bic__list` b WHERE `VKEYDEL` IS NOT NULL HAVING `count` > 1 ORDER BY `count` DESC;'));
-        exit;
-
-        $currentDate = strtotime(date('d.m.Y', time()));
-        #Get date of current library
-        $libDate = $dbController->selectValue('SELECT `value` FROM `'.$this->prefix.'settings` WHERE `setting`=\'date\'');
-        $libDate = strtotime(date('d.m.Y', intval($libDate)));
-        while ($libDate <= $currentDate) {
-            $download = $this->download($libDate);
-            if ($download === true) {
-                #The day does not have library, skip it
-                continue;
-            } elseif ($download === false) {
-                #Failed to download. Stop processing to avoid loosing sequence
-                return false;
-            } else {
-                #Load file
-                libxml_use_internal_errors(true);
-                $library = new \DOMDocument();
-                $library->load(realpath($download));
-                #Get date from root node
-                $elements = new \DOMXpath($library);
-                #Check date of the library
-                if ($elements->evaluate('string(/*/@EDDate)') !== date('Y-m-d', $libDate)) {
-                    #Date mismatch. Stop processing to avoid loosing sequence
-                    return false;
-                }
-                #Get entries
-                $elements = $library->getElementsByTagName('BICDirectoryEntry');
-                $queries = [];
-                #Iterate entries
-                foreach ($elements as $element) {
-                    var_dump($element);
-                }
-                #Increase $libDate by 1 day
-                $libDate = $libDate + 86400;
-                #Remove library file
-                #@unlink($download);
-                exit;
-            }
-        }
-        return true;
-    }
-
-    #Function to download BIC
-    /**
-     * @throws \Exception
-     */
-    private function download(int $date): bool|string
-    {
-        #Generate zip path
-        $fileName = sys_get_temp_dir().'/'.date('Ymd', $date).'_ED807_full.xml';
-        #Generate link
-        $link = self::bicDownBase.date('d.m.Y', $date);
-        #Check if cURL handle already created and create it if not
-        if (empty(self::$curlHandle)) {
-            self::$curlHandle = curl_init();
-            if (self::$curlHandle === false) {
-                throw new \Exception('Failed to initiate cURL handle');
-            } else {
-                if(!curl_setopt_array(self::$curlHandle, $this->CURL_OPTIONS)) {
-                    throw new \Exception('Failed to set cURL handle options');
-                }
-            }
-        }
-        #Get page contents
-        curl_setopt(self::$curlHandle, CURLOPT_URL, $link);
-        #Get response
-        $response = curl_exec(self::$curlHandle);
-        $httpCode = curl_getinfo(self::$curlHandle, CURLINFO_HTTP_CODE);
-        if ($response === false || $httpCode !== 200) {
-            return false;
-        } else {
-            $data = substr($response, curl_getinfo(self::$curlHandle, CURLINFO_HEADER_SIZE));
-        }
-        #Load page as DOM Document
-        libxml_use_internal_errors(true);
-        $page = new \DOMDocument();
-        $page->loadHTML($data);
-        #Get all links on page
-        $as = $page->getElementsByTagName('a');
-        #Iterrate links to find the one we need
-        foreach ($as as $a) {
-            #Filter only those that has proper value
-            if (preg_match('/\s*Справочник БИК\s*/iu', $a->textContent) === 1) {
-                #Get href attribute
-                $href = $a->getAttribute('href');
-                #Skip link for "current" library
-                if (preg_match('/\/s\/newbik/iu', $href) === 0) {
-                    $href = self::bicBaseHref.$href;
-                    #Attempt to actually download the zip file
-                    if (file_put_contents($fileName.'.zip', @fopen($href, 'r'))) {
-                        #Unzip the file
-                        if (file_exists($fileName.'.zip')) {
-                            $zip = new \ZipArchive;
-                            if ($zip->open($fileName.'.zip') === true) {
-                                $zip->extractTo(sys_get_temp_dir());
-                                $zip->close();
-                            }
-                            #Remove zip file
-                            @unlink($fileName.'.zip');
-                            #Check if ED807 file exists
-                            if (file_exists($fileName)) {
-                                return $fileName;
-                            } else {
-                                return false;
-                            }
-                        }
-                    }
-                    return true;
-                }
-            }
-        }
-        #This means, that no file was found for the date (which is not necessarily a problem)
-        return true;
-    }
-
-
-
-
-
-
-
-
-
-
-
-    #########
-    #Old code
-    #########
 
     #Function to return current data about the bank
     /**

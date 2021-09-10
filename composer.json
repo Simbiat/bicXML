@@ -16,7 +16,6 @@
     "require": {
         "php": "^8",
         "simbiat/database": "^2",
-        "simbiat/accountkeying": "*",
         "simbiat/arrayhelpers": "^2"
     },
     "autoload": {
